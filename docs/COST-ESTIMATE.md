@@ -13,12 +13,14 @@ Steady-state architecture running 24/7 at typical load (~10% of World Cup spike 
 ### 1. EC2 - Node.js Application Servers
 
 **Configuration:**
+
 - Instance Type: `t3.medium` (2 vCPU, 4 GB RAM)
 - Hourly Rate: **$0.0416/hour** (on-demand)
 - Baseline Instances: **5 instances** (minimum fleet)
 - Hours per Month: **720 hours**
 
 **Calculation:**
+
 ```
 Monthly Cost = Instance Rate × Hours × Count
              = $0.0416/hour × 720 hours × 5 instances
@@ -33,12 +35,14 @@ Monthly Cost = Instance Rate × Hours × Count
 ### 2. RDS - PostgreSQL Primary Database
 
 **Configuration:**
+
 - Instance Type: `db.t3.medium` (2 vCPU, 4 GB RAM)
 - Hourly Rate: **$0.034/hour** (on-demand, single-AZ)
 - Hours per Month: **720 hours**
 - Storage: **500 GB SSD** ($0.115/GB-month)
 
 **Calculation:**
+
 ```
 Compute Cost = $0.034/hour × 720 hours
              = $24.48/month
@@ -56,6 +60,7 @@ Total RDS Primary = $24.48 + $57.50 = $81.98/month
 ### 3. RDS - PostgreSQL Read Replica
 
 **Configuration:**
+
 - Instance Type: `db.t3.medium` (same as primary, 2 vCPU, 4 GB RAM)
 - Hourly Rate: **$0.034/hour**
 - Count: **1 replica** (warm standby for failover)
@@ -63,6 +68,7 @@ Total RDS Primary = $24.48 + $57.50 = $81.98/month
 - Storage: **500 GB SSD** (replicated, same cost)
 
 **Calculation:**
+
 ```
 Compute Cost = $0.034/hour × 720 hours × 1 replica
              = $24.48/month
@@ -80,12 +86,14 @@ Total RDS Replica = $24.48 + $57.50 = $81.98/month
 ### 4. ElastiCache - Redis Cluster
 
 **Configuration:**
+
 - Node Type: `cache.r6g.large` (2 vCPU, 16 GB RAM, ARM-based Graviton2)
 - Hourly Rate: **$0.126/hour** (on-demand)
 - Nodes: **2 nodes** (primary + replica for high availability)
 - Hours per Month: **720 hours**
 
 **Calculation:**
+
 ```
 Monthly Cost = $0.126/hour × 720 hours × 2 nodes
              = $181.44/month
@@ -98,6 +106,7 @@ Monthly Cost = $0.126/hour × 720 hours × 2 nodes
 ### 5. Application Load Balancer (ALB)
 
 **Configuration:**
+
 - Base Cost: **$0.0225/hour**
 - LCU (Load Balancer Capacity Unit) estimate:
   - Baseline RPS: ~50k/s (distributed across instances)
@@ -108,6 +117,7 @@ Monthly Cost = $0.126/hour × 720 hours × 2 nodes
 - Hours per Month: **720 hours**
 
 **Calculation:**
+
 ```
 Base Cost = $0.0225/hour × 720 hours
           = $16.20/month
@@ -125,6 +135,7 @@ Total ALB = $16.20 + $8.64 = $24.84/month
 ### 6. CloudFront CDN - Data Transfer
 
 **Configuration:**
+
 - Cache Behavior:
   - Images/Static Assets: **100% cache hit rate** (origin-level cache)
   - Cache-Control: max-age=86400 (24 hours)
@@ -137,11 +148,13 @@ Total ALB = $16.20 + $8.64 = $24.84/month
   - Origin Shield: **Enabled** (extra 0.01/GB for origin protection)
 
 **Pricing Tiers (weighted by region):**
+
 - US/Europe (50% of traffic): **$0.085/GB**
 - Asia-Pacific (40% of traffic): **$0.130/GB**
 - Middle East/Africa (10% of traffic): **$0.180/GB**
 
 **Calculation:**
+
 ```
 US/EU Transfer = 3 TB × $0.085/GB
                = 3,000 GB × $0.085/GB
@@ -173,6 +186,7 @@ Total CloudFront = $255 + $312 + $108 + $60 + $45 = $780.00/month
 ### 7. SQS - Payment Queue
 
 **Configuration:**
+
 - Queue Type: Standard Queue (FIFO would be overkill for payments)
 - Baseline Message Volume:
   - Checkout rate: ~5,000/day (normal traffic)
@@ -181,6 +195,7 @@ Total CloudFront = $255 + $312 + $108 + $60 + $45 = $780.00/month
 - Pricing: **$0.40 per million requests**
 
 **Calculation:**
+
 ```
 Cost = (150,000 messages / 1,000,000) × $0.40
      = 0.15 × $0.40
@@ -196,6 +211,7 @@ Note: SQS cost negligible at baseline. Rounded to $5/month minimum.
 ### 8. Data Transfer - Inter-region (replication, failover)
 
 **Configuration:**
+
 - RDS replication: Primary to Replica (same AZ, no cost)
 - CloudFront origin egress: Counted in CloudFront above
 - EC2 inter-region failover: **Minimal** ($0/month at baseline)
@@ -206,16 +222,16 @@ Note: SQS cost negligible at baseline. Rounded to $5/month minimum.
 
 ## **BASELINE MONTHLY TOTAL**
 
-| Component | Cost (USD) | Cost (INR) |
-|-----------|-----------|-----------|
-| EC2 (5 × t3.medium) | $748.80 | ₹62,150 |
-| RDS Primary (db.t3.medium) | $81.98 | ₹6,804 |
-| RDS Replica (db.t3.medium) | $81.98 | ₹6,804 |
-| ElastiCache Redis (2 × r6g.large) | $181.44 | ₹15,039 |
-| ALB | $24.84 | ₹2,061 |
-| CloudFront (6 TB data) | $780.00 | ₹64,740 |
-| SQS | $5.00 | ₹415 |
-| **BASELINE TOTAL** | **$1,904.04** | **₹158,013** |
+| Component                         | Cost (USD)    | Cost (INR)   |
+| --------------------------------- | ------------- | ------------ |
+| EC2 (5 × t3.medium)               | $748.80       | ₹62,150      |
+| RDS Primary (db.t3.medium)        | $81.98        | ₹6,804       |
+| RDS Replica (db.t3.medium)        | $81.98        | ₹6,804       |
+| ElastiCache Redis (2 × r6g.large) | $181.44       | ₹15,039      |
+| ALB                               | $24.84        | ₹2,061       |
+| CloudFront (6 TB data)            | $780.00       | ₹64,740      |
+| SQS                               | $5.00         | ₹415         |
+| **BASELINE TOTAL**                | **$1,904.04** | **₹158,013** |
 
 ---
 
@@ -239,11 +255,13 @@ T+4:00 (12 AM):   Back to baseline (5 instances)
 ### 1. Additional EC2 Instances (Auto-Scale)
 
 **Configuration:**
+
 - Baseline: 5 instances (always running)
 - Peak scale-up: 40 instances total (35 additional)
 - Instance Type: `t3.medium` ($0.0416/hour)
 
 **Timeline:**
+
 ```
 T+0:00-0:30:  5 instances (baseline, 30 min)
 T+0:30-1:00:  20 instances (15 additional, 30 min)
@@ -253,6 +271,7 @@ T+4:00+:      5 instances (back to baseline)
 ```
 
 **Calculation:**
+
 ```
 Baseline (4 hrs) = 5 instances × 4 hrs × $0.0416/hr
                  = $0.832
@@ -283,12 +302,14 @@ More conservative estimate: actual cost ~$3.50-4.50 for 4-hour event
 ### 2. CloudFront Surge Transfer
 
 **Configuration:**
+
 - Peak RPS: 1.2M (includes ~6% static asset requests)
 - Image requests at peak: 72k/sec = 259 million images/4 hours
 - Average image size: 100 KB
 - Peak data transfer: 259M × 100KB = **25.9 TB over 4 hours**
 
 **Calculation:**
+
 ```
 CloudFront surge is already counted in monthly estimate,
 but additional transfer during peak:
@@ -311,6 +332,7 @@ Peak CDN Cost = 25.9 TB × weighted avg $0.115/GB
 ### 3. RDS Surge - Read Replica Promotion (if primary fails)
 
 **Configuration:**
+
 - Assumption: Primary might experience brief slowdown
 - Replica auto-promotion: 5-10 minute recovery
 - Cost: Minimal extra (already running)
@@ -322,6 +344,7 @@ Peak CDN Cost = 25.9 TB × weighted avg $0.115/GB
 ### 4. ElastiCache Surge (Redis commands at peak)
 
 **Configuration:**
+
 - Baseline: 2 nodes (r6g.large)
 - Peak: No scaling (Redis handles 1.2M ops/sec easily)
 - Cost: Minimal extra
@@ -333,11 +356,13 @@ Peak CDN Cost = 25.9 TB × weighted avg $0.115/GB
 ### 5. ALB Surge - LCU scaling
 
 **Configuration:**
+
 - Baseline: ~2 LCUs
 - Peak: ~8 LCUs (1.2M RPS with complex routing)
 - Duration: 4 hours
 
 **Calculation:**
+
 ```
 Peak LCU Cost = $0.006/LCU/hour × 8 LCUs × 4 hours
               = $0.192
@@ -354,11 +379,13 @@ Marginal cost (6 additional LCUs) = $0.006 × 6 × 4 = $0.144
 ### 6. SQS Surge - Payment Queue
 
 **Configuration:**
+
 - Baseline: 5k payments/day = ~200/hour
 - Peak: 600k payments over 4 hours = 150k/hour
 - Additional messages: ~594k over 4 hours
 
 **Calculation:**
+
 ```
 Peak SQS Cost = (594,000 messages / 1,000,000) × $0.40
               = 0.594 × $0.40
@@ -375,13 +402,13 @@ Rounding to $1.00 to account for message deduplication checks
 
 ## **PEAK EVENT COST (4 hours)**
 
-| Component | Cost (USD) | Cost (INR) |
-|-----------|-----------|-----------|
-| EC2 Auto-Scale (+35 instances) | $4.00 | ₹332 |
-| CloudFront Surge (+25.9 TB) | $2,978.50 | ₹247,215 |
-| ALB LCU Surge | $0.15 | ₹12 |
-| SQS Surge | $1.00 | ₹83 |
-| **PEAK EVENT TOTAL (4 hrs)** | **$2,983.65** | **₹247,643** |
+| Component                      | Cost (USD)    | Cost (INR)   |
+| ------------------------------ | ------------- | ------------ |
+| EC2 Auto-Scale (+35 instances) | $4.00         | ₹332         |
+| CloudFront Surge (+25.9 TB)    | $2,978.50     | ₹247,215     |
+| ALB LCU Surge                  | $0.15         | ₹12          |
+| SQS Surge                      | $1.00         | ₹83          |
+| **PEAK EVENT TOTAL (4 hrs)**   | **$2,983.65** | **₹247,643** |
 
 ---
 
@@ -404,6 +431,7 @@ Monthly Baseline = $1,904.04
 ### Scenario 2: Running on Monolith (No Scaling)
 
 **Hypothetical:**
+
 - Keep 5 instances of t3.medium running 24/7
 - Same baseline cost: **$1,904.04/month**
 - But: **System crashes during peak** (no revenue, plus emergency incident costs)
@@ -419,10 +447,12 @@ Monthly Baseline = $1,904.04
 ### Revenue Loss During Outage
 
 **Given Parameters:**
+
 - Loss rate during outage: **₹4.2 crore per minute** (provided)
 - Outage duration in World Cup scenario: **45 minutes** (from cascade analysis)
 
 **Revenue Loss Calculation:**
+
 ```
 Lost Revenue = ₹4.2 crore/minute × 45 minutes
              = ₹189 crore
@@ -432,6 +462,7 @@ Lost Revenue = ₹4.2 crore/minute × 45 minutes
 ### Cost-Benefit Analysis
 
 **Option A: Keep Monolith**
+
 ```
 Monthly Infrastructure Cost:       $1,904.04
 Probability of outage per month:  ~90% (expected 1x per viral event)
@@ -442,6 +473,7 @@ Total Expected Monthly Cost:      $204.94M (+ infrastructure costs)
 ```
 
 **Option B: Deploy Scaled Infrastructure**
+
 ```
 Monthly Infrastructure Cost:       $4,887.69 (includes 1 World Cup event)
 Probability of outage per month:  <0.1% (99.9% uptime SLA)
@@ -459,7 +491,7 @@ Annual Savings = $205M × 12 months ≈ $2.46 BILLION per year
 Break-Even Time: 0.07 seconds (under 1 hundredth of a second)
                  (Cost of outage > Annual infrastructure cost)
 
-Risk Reduction: 
+Risk Reduction:
   - Before: 90% probability of ₹189 Cr loss event
   - After: <0.1% probability of same event
   - Expected loss reduction: 899x
@@ -469,13 +501,14 @@ Risk Reduction:
 
 **The scaled architecture is not just cost-effective—it is financially mandatory.**
 
-Even accounting for the increased monthly infrastructure cost of **$4,887.69** (compared to baseline $1,904.04), the system prevents a **₹189 crore loss** every time a viral event occurs. 
+Even accounting for the increased monthly infrastructure cost of **$4,887.69** (compared to baseline $1,904.04), the system prevents a **₹189 crore loss** every time a viral event occurs.
 
 With an expected **1 major viral event per month** (World Cup, Black Friday, festival sales, etc.), the **expected monthly loss without scaling is $204.94M**. Deploying the scaled architecture reduces this to near-zero while adding only $2,983.65 in peak costs.
 
 **The ROI is 41,890:1** — for every dollar spent on infrastructure, the company avoids $41,890 in expected losses.
 
 Furthermore, this analysis assumes only 1 World Cup event per month. In reality:
+
 - IPL matches (cricket): 60 matches/season
 - Festival sales (Diwali, Holi): 4 major events/year
 - New Year campaigns: 2x/year
@@ -516,13 +549,12 @@ If costs need to be reduced further:
 
 ## Monthly Infrastructure Cost Summary
 
-| Metric | Amount |
-|--------|--------|
-| Baseline Monthly Cost | $1,904.04 |
-| Peak Event Cost (4 hrs) | $2,983.65 |
-| **Total Monthly with 1 Peak Event** | **$4,887.69** |
-| Estimated Outage Loss (if monolith fails) | $227,710,000 |
-| **ROI on Scaling Investment** | **41,890:1** |
-| Annual Infrastructure Cost | $58,652 |
-| Annual Revenue Saved (4 World Cups) | ~$911M |
-
+| Metric                                    | Amount        |
+| ----------------------------------------- | ------------- |
+| Baseline Monthly Cost                     | $1,904.04     |
+| Peak Event Cost (4 hrs)                   | $2,983.65     |
+| **Total Monthly with 1 Peak Event**       | **$4,887.69** |
+| Estimated Outage Loss (if monolith fails) | $227,710,000  |
+| **ROI on Scaling Investment**             | **41,890:1**  |
+| Annual Infrastructure Cost                | $58,652       |
+| Annual Revenue Saved (4 World Cups)       | ~$911M        |
