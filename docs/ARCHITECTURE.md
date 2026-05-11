@@ -3,6 +3,7 @@
 ## System Understanding
 
 ### Current Architecture
+
 - **Compute**: Single Node.js Express process on 1 CPU core, 4GB RAM
 - **Database**: PostgreSQL with `max_connections = 100`
 - **Caching**: None
@@ -20,6 +21,7 @@
 **Expected engagement**: ~8% CTR = **14 million users opening the app in 60 seconds**
 
 ### Request Volume Math
+
 - **14 million requests in 60 seconds** = **~233,000 requests per second**
 - This is 233 times the typical system load
 
@@ -29,11 +31,12 @@
 
 ### The Hard Limits (Ranked by Impact)
 
-#### 1. **Database Connection Pool - FIRST TO FAIL** 
+#### 1. **Database Connection Pool - FIRST TO FAIL**
+
 - **Limit**: 100 concurrent connections
 - **Incoming requests**: 233,000 per second
 - **Ratio**: 0.043% of peak requests can get a connection
-- **What happens**: 
+- **What happens**:
   - t=0-1s: All 100 connections consumed
   - t=1s+: 232,900+ requests per second are queuing in Node.js memory, waiting for a connection
   - Requests start timing out after `connectionAcquire` timeout (typically 30s-60s)
@@ -43,11 +46,12 @@
 
 ---
 
-#### 2. **Synchronous Payment Processing - Creates Connection Starvation** 
+#### 2. **Synchronous Payment Processing - Creates Connection Starvation**
+
 - **Scenario**: 10-15% of traffic is checkout requests (1.4-2.1 million payment requests in 60s)
 - **Per request**: 200-2000ms holds a DB connection open while waiting for Razorpay
 - **Connection hold time**: Assume 500ms average per payment call
-- **Impact**: 
+- **Impact**:
   - 1.4M payment requests × 0.5s = 700,000 connection-seconds needed
   - But we only have 100 connections × 60 seconds = 6,000 connection-seconds available
   - Payment requests alone need 116x more connection time than available
@@ -55,9 +59,10 @@
 
 ---
 
-#### 3. **Single CPU Core - Process Bottleneck** 
+#### 3. **Single CPU Core - Process Bottleneck**
+
 - **Limit**: 1 CPU core
-- **Node.js baseline**: ~1,000-10,000 req/s per core *under optimal conditions* (minimal I/O, simple operations)
+- **Node.js baseline**: ~1,000-10,000 req/s per core _under optimal conditions_ (minimal I/O, simple operations)
 - **Our conditions**: Complex DB queries, payment calls, image serving, all on 1 core
 - **Expected throughput**: ~500-2,000 req/s realistically
 - **Ratio**: 233,000 ÷ 2,000 = **116x overload**
@@ -69,7 +74,8 @@
 
 ---
 
-#### 4. **RAM Exhaustion - OOM Crash Incoming** 
+#### 4. **RAM Exhaustion - OOM Crash Incoming**
+
 - **Available**: 4GB
 - **Node.js overhead**: ~300-500MB
 - **Request queue**: Each queued request takes ~50-100KB in memory (headers, body, metadata)
@@ -82,7 +88,8 @@
 
 ---
 
-#### 5. **No CDN - Static Assets Starve the API** 
+#### 5. **No CDN - Static Assets Starve the API**
+
 - **Static file requests**: Assume 30-40% of requests are for images/static assets
 - **Volume**: ~70 million image requests in 60 seconds
 - **Node.js cost per image**: Disk I/O + HTTP serialization + network buffer
@@ -91,7 +98,8 @@
 
 ---
 
-#### 6. **No Load Balancer - All-or-Nothing Failure** 
+#### 6. **No Load Balancer - All-or-Nothing Failure**
+
 - **Single IP**: One process serves everything
 - **Process crash**: All 14 million users get disconnected simultaneously
 - **No graceful degradation**: No failover, no circuit breaker
@@ -141,11 +149,13 @@ t=10-30s: Thundering herd problem
 ## The Weakest Component: **Database Connection Pool**
 
 ### Why?
+
 The DB connection limit (100) is the **absolute hard ceiling** that no amount of CPU, RAM, or network optimization can overcome. It's a finite resource that depletes at a rate of 233,000 requests per second to fulfill.
 
 **Analogy**: Imagine a single checkout counter at a supermarket. 233,000 customers arrive in 1 minute but only 1 person can checkout at a time (if payments weren't slow). With synchronous payment calls, it's like that 1 person stops and calls the bank for every transaction while staying at the counter.
 
 ### Secondary Failure Points (in order):
+
 1. **Synchronous payment calls** - Hold connections for 200-2000ms = massive bottleneck
 2. **Single CPU core** - Can't process the load even if connections were infinite
 3. **4GB RAM** - Not enough to queue 14M requests
@@ -156,6 +166,7 @@ The DB connection limit (100) is the **absolute hard ceiling** that no amount of
 ## What Fails First: **100% Connection Pool Exhaustion**
 
 Within **1 second** of the spike, all 100 database connections are consumed. After that:
+
 - No new DB queries can execute
 - All requests queue in Node.js memory (bleeding into #2 and #3 failures)
 - System enters a death spiral: requests pile up → memory fills → GC thrashes → CPU stuck → process crashes
@@ -167,6 +178,7 @@ The system has **no graceful degradation path**. It's binary: working or crashed
 ## Key Takeaway
 
 This monolith doesn't just need optimization—it needs **fundamental architectural transformation**:
+
 - ✗ Cannot handle 233k req/s with 1 CPU, 1 process, 100 DB connections
 - ✗ Synchronous payment processing turns every checkout into a connection leak
 - ✗ No caching, no CDN, no load balancing means zero resilience

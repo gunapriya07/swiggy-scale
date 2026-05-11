@@ -3,6 +3,7 @@
 ## Section 1: Traffic Simulation Math
 
 ### The Event Parameters
+
 - **Total users notified**: 180 million
 - **Click-through rate (CTR)**: 8%
 - **Users who open app in spike window**: 180M × 8% = **14.4 million users**
@@ -12,14 +13,15 @@
 
 **Assumption: Users distribute across three behaviors in first 60 seconds**
 
-| Behavior | % of Users | Calls/User | Total Calls |
-|----------|-----------|-----------|------------|
-| Browse/Explore only | 50% | 5 calls | 36M calls |
-| Browse + Add to Cart | 30% | 8 calls | 34.56M calls |
-| Full Checkout (with payment) | 20% | 10 calls | 28.8M calls |
-| **Total Calls** | - | - | **99.36M calls** |
+| Behavior                     | % of Users | Calls/User | Total Calls      |
+| ---------------------------- | ---------- | ---------- | ---------------- |
+| Browse/Explore only          | 50%        | 5 calls    | 36M calls        |
+| Browse + Add to Cart         | 30%        | 8 calls    | 34.56M calls     |
+| Full Checkout (with payment) | 20%        | 10 calls   | 28.8M calls      |
+| **Total Calls**              | -          | -          | **99.36M calls** |
 
 **Peak RPS Calculation:**
+
 - Total calls across 60-second window: 99.36M
 - **Average RPS = 99.36M / 60s = 1.656M RPS**
 - **Peak RPS (first 15 seconds of spike)**: ~3.2M RPS
@@ -30,13 +32,13 @@
 
 ### Call Types Breakdown (% of total traffic)
 
-| Call Type | % of RPS | Typical Latency | DB Query Time | Notes |
-|-----------|---------|-----------------|---------------|-------|
-| Feed/Browse reads | 50% | 50-100ms | 20-50ms | Cache-able, light queries |
-| Search/Filter | 15% | 100-200ms | 50-100ms | JOIN-heavy queries |
-| Add to Cart | 20% | 150-300ms | 100-200ms | Session writes, cart table |
-| Checkout (pre-payment) | 10% | 200-400ms | 150-300ms | Transaction, inventory check |
-| Payment processing | 5% | **500-2000ms** | **200-300ms + Razorpay wait** | **BLOCKING - synchronous** |
+| Call Type              | % of RPS | Typical Latency | DB Query Time                 | Notes                        |
+| ---------------------- | -------- | --------------- | ----------------------------- | ---------------------------- |
+| Feed/Browse reads      | 50%      | 50-100ms        | 20-50ms                       | Cache-able, light queries    |
+| Search/Filter          | 15%      | 100-200ms       | 50-100ms                      | JOIN-heavy queries           |
+| Add to Cart            | 20%      | 150-300ms       | 100-200ms                     | Session writes, cart table   |
+| Checkout (pre-payment) | 10%      | 200-400ms       | 150-300ms                     | Transaction, inventory check |
+| Payment processing     | 5%       | **500-2000ms**  | **200-300ms + Razorpay wait** | **BLOCKING - synchronous**   |
 
 ---
 
@@ -45,6 +47,7 @@
 ### Hard Limits - The Finite Resources
 
 #### PostgreSQL Database
+
 ```
 Max Connections: 100 (hard limit, configured limit not theoretical)
 Connection per query (avg): 1 connection
@@ -53,6 +56,7 @@ Connection time (from pool): ~5-10ms
 ```
 
 #### Node.js Application Server (t3.medium spec)
+
 ```
 CPU Cores: 1 (single core, no multi-processing)
 RAM Available: 4GB total
@@ -64,6 +68,7 @@ Typical callback queue drain time: 1-5ms per batch
 ```
 
 #### Synchronous Payment Gateway (Razorpay)
+
 ```
 Response time per call: 200-2000ms (average 500ms)
 Connection hold time during payment: 500ms (entire duration)
@@ -72,6 +77,7 @@ Timeout responses: immediate 504/503 after 10s
 ```
 
 #### Network Interface (NIC) - Static Assets
+
 ```
 Throughput: ~1 Gbps (single NIC on t3.medium)
 Typical image size: 50-200KB (average 100KB)
@@ -101,6 +107,7 @@ $$144,000 \text{ connections needed} > 100 \text{ connections available}$$
 **Result: Pool exhausts after approximately 0.009 seconds (9 milliseconds) of sustained 1.2M RPS**
 
 In reality, the spike ramps up, so:
+
 - T+0-1s: Pool fills gradually, reaches 100 at ~t=0.3s
 - T+1s+: 100% of new requests are connection-starved
 
@@ -109,11 +116,13 @@ In reality, the spike ramps up, so:
 ## Section 3: The Cascade - Failure Sequence
 
 ### Failure 1: PostgreSQL Connection Pool Exhaustion
+
 **Severity: CRITICAL**  
 **Triggered at RPS: ~240 RPS (within first 1 second)**  
 **Duration: Persistent throughout incident**
 
 **What happens:**
+
 ```
 t=0s: System idle, 0/100 connections in use
 t=0.3s: 240 RPS incoming → 100 connections instantly consumed
@@ -121,14 +130,16 @@ t=0.31s+: All further database requests wait in connection queue
 ```
 
 **User experience:**
+
 - Initial requests (lucky 100): Complete normally
 - Remaining requests: "ECONNREFUSED", "Cannot acquire connection", "timeout exceeded"
 - Error rate: 99.6% within first second
 
 **Technical details:**
+
 ```javascript
 // Connection pool behavior
-Pool.prototype.acquire = function(callback) {
+Pool.prototype.acquire = function (callback) {
   if (availableConnections > 0) {
     // Instant (0-1ms)
     return callback(connection);
@@ -143,6 +154,7 @@ Pool.prototype.acquire = function(callback) {
 ```
 
 **Cascades to:**
+
 - Node.js event loop gets flooded with waiting callbacks
 - Connection timeout (~30-60s) triggers process errors
 - Request queue grows unbounded in memory
@@ -150,11 +162,13 @@ Pool.prototype.acquire = function(callback) {
 ---
 
 ### Failure 2: Node.js Event Loop Saturation
+
 **Severity: CRITICAL**  
 **Triggered at RPS: ~12,000 RPS (reached at t~0.5s)**  
 **Duration: Until process crashes**
 
 **What happens:**
+
 ```
 t=0.5s: RPS = 12,000 → Event loop callback queue fills
         - New requests wait 5-10ms for their turn in event loop
@@ -166,11 +180,13 @@ t=1s: RPS = 240k → Event loop completely blocked
 ```
 
 **User experience:**
+
 - Page loads hang for 10+ seconds
 - Timeouts cascade (client retries after 5s, then 10s)
 - Browser shows spinning loader indefinitely
 
 **Cascades to:**
+
 - Memory pressure increases (queued callbacks consume RAM)
 - CPU goes to 100% (GC + queue processing)
 - Out-of-memory condition
@@ -178,11 +194,13 @@ t=1s: RPS = 240k → Event loop completely blocked
 ---
 
 ### Failure 3: Synchronous Payment Call Amplification
+
 **Severity: CRITICAL**  
 **Triggered at RPS: ~48,000 RPS (5% of 1.2M is payment traffic)**  
 **Duration: Until connections freed**
 
 **What happens:**
+
 ```
 At peak 1.2M RPS:
 - 60,000 payment requests/second
@@ -192,6 +210,7 @@ At peak 1.2M RPS:
 ```
 
 **Payment request lifecycle (holds connection entire time):**
+
 ```
 t1: Request arrives → acquires connection
 t1+50ms: Query user account balance → still holding connection
@@ -203,18 +222,21 @@ t1+700ms: Release connection
 ```
 
 **What users see:**
+
 - Checkout page shows spinner for 10-30+ seconds
 - Some payments timeout without confirming
 - Users see: "Payment processing - please wait" then "Timeout - try again"
 - Duplicate charges occur (retry while first request still processing)
 
 **Database impact:**
+
 - Payment transactions are slow transactions (hold locks)
 - Normal queries starve waiting for connections
 - Lock contention on: users table, carts table, transactions table
 - Deadlocks likely when concurrent updates to same user
 
 **Cascades to:**
+
 - All other queries starve (no connections available)
 - Inventory gets corrupted (concurrent updates without proper sequencing)
 - Promo code race condition amplified
@@ -222,11 +244,13 @@ t1+700ms: Release connection
 ---
 
 ### Failure 4: Promo Code Race Condition
+
 **Severity: HIGH**  
 **Triggered at RPS: ~100,000 RPS (reached at t~0.4s)**  
 **Duration: Throughout incident**
 
 **The race condition:**
+
 ```sql
 -- Current code (pseudo-code)
 tx1.BEGIN;
@@ -245,22 +269,24 @@ tx2. COMMIT;
 
 **At scale (100k concurrent requests, 1% using promo = 1k promo reads/s):**
 
-| Time | Event |
-|------|-------|
-| t=0s | Promo initialized: remaining_uses = 14.4M (for 14.4M users) |
-| t=10s | **Expected uses**: 10,000 (1k/s × 10s) |
-| t=10s | **Actual uses (measured)**: 250,000+ (race conditions applied 25x multiplier) |
-| t=45s | Promo exhausted (by actual count) but database shows only 1M uses |
-| t=45s+ | Some users still seeing promo active, but charge full price |
-| t=60s | Invoice audits reveal 14.8M charges but only 6M promo discounts recorded |
+| Time   | Event                                                                         |
+| ------ | ----------------------------------------------------------------------------- |
+| t=0s   | Promo initialized: remaining_uses = 14.4M (for 14.4M users)                   |
+| t=10s  | **Expected uses**: 10,000 (1k/s × 10s)                                        |
+| t=10s  | **Actual uses (measured)**: 250,000+ (race conditions applied 25x multiplier) |
+| t=45s  | Promo exhausted (by actual count) but database shows only 1M uses             |
+| t=45s+ | Some users still seeing promo active, but charge full price                   |
+| t=60s  | Invoice audits reveal 14.8M charges but only 6M promo discounts recorded      |
 
 **User impact:**
+
 - Some users charged full price despite code appearing active
 - Some users see promo discount applied twice (race: read-update not atomic)
 - Refund requests flood in: "I used code but wasn't discounted"
 - Fraudulent "refund" attempts using legitimate proof
 
 **Cascades to:**
+
 - Revenue discrepancies detected by accounting
 - Refund processor overloaded
 - Support team swamped
@@ -268,11 +294,13 @@ tx2. COMMIT;
 ---
 
 ### Failure 5: Static Asset NIC Saturation
+
 **Severity: HIGH**  
 **Triggered at RPS: ~72,000 image requests/second (6% of traffic × 1.2M)**  
 **Duration: Persistent throughout incident**
 
 **The calculation:**
+
 ```
 Total RPS: 1.2M
 Static asset requests: ~6% = 72,000 req/s
@@ -283,6 +311,7 @@ Ratio: 57.6x OVERSUBSCRIPTION
 ```
 
 **What happens (network buffer overflow):**
+
 ```
 t=0s: NIC transmit queue empty
 t=0.5s: Image requests = 36k/s, NIC buffer = 45MB used
@@ -297,6 +326,7 @@ t=3s: Memory for image buffers reaches 500MB-1GB
 ```
 
 **Browser/user experience:**
+
 ```
 1. Page loads (HTML arrives)
 2. Browser requests 20-30 images in parallel
@@ -308,6 +338,7 @@ t=3s: Memory for image buffers reaches 500MB-1GB
 ```
 
 **Server-side cascade:**
+
 - Image file descriptors fill up (max open files = 65,536)
 - Open files limit reached within 60-90 seconds
 - Further image requests fail with "EMFILE: too many open files"
@@ -315,12 +346,14 @@ t=3s: Memory for image buffers reaches 500MB-1GB
 - System enters cascade death spiral
 
 **Network metrics:**
+
 - NIC transmit queue: 256-512MB (backlogged)
 - NIC packet drops: 1-5% (OS drops due to buffer full)
 - TCP retransmit rate: 15-25% (clients retrying)
 - RTT (round-trip time): 50ms → 2000ms (queuing delay)
 
 **Cascades to:**
+
 - Retry traffic amplifies the spike 1.3-1.5x
 - New users still trying to load page
 - Process runs out of file descriptors
@@ -330,21 +363,22 @@ t=3s: Memory for image buffers reaches 500MB-1GB
 ---
 
 ### Failure 6: Node.js Out-of-Memory Crash
+
 **Severity: CRITICAL**  
 **Triggered at RPS: ~15,000 queued requests in memory (reached at t~2.5-3.5s)**  
 **Duration: Until manual restart (~5-10 minutes)**
 
 **Memory allocation breakdown at crash:**
 
-| Component | Size | Count | Total |
-|-----------|------|-------|-------|
-| Queued request objects | 50-100KB | 15,000 | 750MB-1.5GB |
-| Image buffers (backlogged) | 100KB | 8,000 | 800MB |
-| Connection pool queue | 10KB | 100,000 | 1GB |
-| String/buffer caches | - | - | 300-500MB |
-| GC metadata overhead | - | - | 200-300MB |
-| **Total Used Heap** | - | - | **3.5-4.1GB** |
-| **Heap Limit** | - | - | **3.5GB** |
+| Component                  | Size     | Count   | Total         |
+| -------------------------- | -------- | ------- | ------------- |
+| Queued request objects     | 50-100KB | 15,000  | 750MB-1.5GB   |
+| Image buffers (backlogged) | 100KB    | 8,000   | 800MB         |
+| Connection pool queue      | 10KB     | 100,000 | 1GB           |
+| String/buffer caches       | -        | -       | 300-500MB     |
+| GC metadata overhead       | -        | -       | 200-300MB     |
+| **Total Used Heap**        | -        | -       | **3.5-4.1GB** |
+| **Heap Limit**             | -        | -       | **3.5GB**     |
 
 **The crash:**
 
@@ -358,11 +392,12 @@ new_request_object = new Object(); // 100KB
 
 // Process terminates with exit code 134 (SIGABRT)
 // Error message:
-//   FATAL ERROR: CALL_AND_RETRY_LAST Allocation failed - 
+//   FATAL ERROR: CALL_AND_RETRY_LAST Allocation failed -
 //   JavaScript heap out of memory
 ```
 
 **User experience at crash:**
+
 ```
 t=2.5s: Page still loading, images half-visible, spinner spinning
 t=3s: Browser shows nothing (connection dies without response)
@@ -371,6 +406,7 @@ t=3.1s: Browser shows error: "The server unexpectedly closed the connection"
 ```
 
 **After crash:**
+
 - Process exits (PID dies)
 - Load balancer detects dead process (NO LOAD BALANCER EXISTS - everything broken)
 - Kubernetes/systemd may attempt auto-restart
@@ -379,6 +415,7 @@ t=3.1s: Browser shows error: "The server unexpectedly closed the connection"
 - Recovery stalled: new process starts but can't get DB connections
 
 **Cascades to:**
+
 - Restart loop (each restart crashes within 1-2 seconds)
 - Manual intervention required
 - Full incident escalation
@@ -388,6 +425,7 @@ t=3.1s: Browser shows error: "The server unexpectedly closed the connection"
 ## Section 4: The Timeline
 
 ### T+0s: Event Initiation
+
 ```
 T+0s: Promo notification pushed to 180 million users
       - Notification service: Successful, 0% error rate
@@ -395,6 +433,7 @@ T+0s: Promo notification pushed to 180 million users
 ```
 
 ### T+1-3s: Initial Wave Arrives
+
 ```
 T+1s:  First batch of users opens app (~2M users)
        - RPS: ~200k
@@ -426,7 +465,7 @@ T+2.5s: Peak wave (~8M accumulated, peak RPS: 1.2M)
        - Node.js heap: 2GB+ (critical pressure)
        - GC stop-the-world: 500-800ms pauses every 2-3 seconds
        - Error rate: 45% (timeouts dominate)
-       - Users on client: 
+       - Users on client:
          * Early users: Half-loaded pages with broken images
          * Recent users: "Cannot connect" or blank screen
          * Checkout users: "Payment processing... please wait" [frozen]
@@ -443,6 +482,7 @@ T+3s:  System degradation accelerates
 ```
 
 ### T+3-5s: Cascade Failures
+
 ```
 T+3.2s: [CRITICAL] Out of Memory - Process Crash
         - Node.js heap reaches 3.5GB limit
@@ -472,6 +512,7 @@ T+4-5s: Restart loop
 ```
 
 ### T+5-10s: Manual Intervention Phase
+
 ```
 T+5s:  Incident declared (automated alerts fire)
        - PagerDuty, Slack notifications
@@ -496,7 +537,7 @@ T+9s:  Emergency stabilization decisions
        - Option B: Scale vertically (bigger machine) - 20-40 min
        - Option C: Increase DB connections - limited help, but quick
        - Decision: C + manual request throttling
-       - Action: 
+       - Action:
          * Scale DB max_connections: 100 → 200
          * Enable rate limiting (100 req/s per user IP)
          * Enable read replicas (reduce write contention)
@@ -510,6 +551,7 @@ T+10s: Restart with throttling
 ```
 
 ### T+10-30s: Controlled Degradation
+
 ```
 T+10-15s: Stabilization achieved
           - Process: Running (not crashing)
@@ -531,6 +573,7 @@ T+15-30s: Throughput recovers slightly
 ```
 
 ### T+30-60s: Second Spike Wave
+
 ```
 T+30-45s: Secondary spike from retries
           - Users: "OK the server is back, let me retry"
@@ -554,6 +597,7 @@ T+45-60s: Spike subsides to sustainable load
 ```
 
 ### T+60-300s (T+1-5m): Ongoing Crisis Response
+
 ```
 T+1-2m:  Decision point for recovery strategy
          - Short term: Rate limiting working, system stable
@@ -582,11 +626,12 @@ T+5m+:   Monitoring and cleanup
 ```
 
 ### T+5-30m: Horizontal Scaling Phase
+
 ```
 T+5-10m:  New app servers coming online
           - Servers 2-4 ready: Now 4 processes running
           - Total capacity: 200-250k RPS processed
-          - Load distribution: 
+          - Load distribution:
             - Server 1 (original): 50k RPS
             - Servers 2-4: 50k each = 150k RPS
           - Result: Error rate drops to 20% (less rate limiting needed)
@@ -616,6 +661,7 @@ T+25-30m: Monitoring and alerting
 ```
 
 ### T+30-120m: Post-Incident Operations
+
 ```
 T+30m:   Incident review meeting
          - What happened: Database connection starvation
@@ -652,6 +698,7 @@ T+90-120m: Engineering remediation
 ```
 
 ### T+2-24h: Strategic Follow-up
+
 ```
 T+2h:    All systems stable
          - Orders processing normally
@@ -687,6 +734,7 @@ T+24h+:  Medium/long-term architecture changes (required)
 ```
 
 ### Incident Summary Statistics
+
 ```
 Duration of incident: ~2 minutes (process crashes)
 Duration of degradation: ~30 minutes (rate-limited)
@@ -720,17 +768,20 @@ Lessons learned:
 ## Key Insights for Remediation
 
 **Immediate (within days):**
+
 - Increase DB connection pool: 100 → 500
 - Rate limiting layer: 50k RPS per server
 - Fix promo code race condition
 
 **Short-term (1-2 weeks):**
+
 - Async payment processing (queue-based)
 - Cache layer (Redis) for read-heavy endpoints
 - CDN for static assets
 - Load balancer + 2-3 app servers by default
 
 **Medium-term (1-2 months):**
+
 - Microservices architecture
 - Dedicated payment service (async workers)
 - Dedicated search/recommendation service
@@ -738,6 +789,7 @@ Lessons learned:
 - Order service (transactional consistency)
 
 **Long-term (3-6 months):**
+
 - Event-driven architecture
 - CQRS (Command Query Responsibility Segregation)
 - Saga pattern for distributed transactions
